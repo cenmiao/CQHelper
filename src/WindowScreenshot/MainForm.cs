@@ -30,15 +30,15 @@ public partial class MainForm : Form
 
         // 输出目录
         _outputDirectory = Path.Combine(AppContext.BaseDirectory, "timed_screenshots");
-
-        // 加载配置
-        LoadConfiguration();
     }
 
     protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
         LoadWindowList();
+
+        // 加载配置（在窗口列表加载后）
+        LoadConfiguration();
     }
 
     private void LoadWindowList()
@@ -226,8 +226,12 @@ public partial class MainForm : Form
         // 保存最终配置
         SaveConfiguration();
 
-        // 停止定时截图服务
-        _timedService?.Dispose();
+        // 停止并释放定时截图服务
+        if (_timedService != null)
+        {
+            _timedService.Stop();
+            _timedService.Dispose();
+        }
 
         base.OnFormClosing(e);
     }

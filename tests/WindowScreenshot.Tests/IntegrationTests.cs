@@ -51,13 +51,12 @@ public class IntegrationTests : IDisposable
         var enumerator = new WindowEnumerator();
         var windows = enumerator.EnumWindows();
 
-        Assert.NotEmpty(windows);
-        var targetWindow = windows[0];
-
         // Act
+        var targetWindow = windows[0];
         var foundHandle = finder.FindWindow(targetWindow.Title, targetWindow.ClassName);
 
         // Assert
+        Assert.NotEmpty(windows);
         Assert.Equal(targetWindow.Handle, foundHandle);
     }
 
@@ -94,14 +93,21 @@ public class IntegrationTests : IDisposable
         }
     }
 
+    private bool _cleanedUp = false;
+
     private void Cleanup()
     {
+        if (_cleanedUp)
+            return;
+
         var configDir = Path.GetDirectoryName(_testConfigPath);
         if (!string.IsNullOrEmpty(configDir) && Directory.Exists(configDir))
             Directory.Delete(configDir, true);
 
         if (Directory.Exists(_testOutputDir))
             Directory.Delete(_testOutputDir, true);
+
+        _cleanedUp = true;
     }
 
     public void Dispose()

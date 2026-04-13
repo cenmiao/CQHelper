@@ -46,7 +46,9 @@ public partial class MainForm : Form
 
     private void UpdateScreenshotButtonState()
     {
-        screenshotButton.Enabled = windowComboBox.SelectedIndex >= 0;
+        var hasSelection = windowComboBox.SelectedIndex >= 0;
+        screenshotButton.Enabled = hasSelection;
+        startTimerButton.Enabled = hasSelection;
     }
 
     private void WindowComboBox_SelectedIndexChanged(object sender, EventArgs e)
@@ -174,6 +176,19 @@ public partial class MainForm : Form
                 statusLabel.Text = $"定时截图失败：{ex.Message}";
             }
         }
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        // 停止并释放定时器
+        if (_screenshotTimer != null)
+        {
+            _screenshotTimer.Stop();
+            _screenshotTimer.Dispose();
+            _screenshotTimer = null;
+        }
+
+        base.OnFormClosing(e);
     }
 
     private void UpdateNextScreenshotLabel()

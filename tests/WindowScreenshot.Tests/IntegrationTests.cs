@@ -93,6 +93,36 @@ public class IntegrationTests : IDisposable
         }
     }
 
+    [Fact]
+    public void 完整流程_窗口不存在时停止并触发事件 ()
+    {
+        // Arrange
+        var capturer = new WindowCapturer();
+        var saver = new ScreenshotSaver(capturer);
+        var finder = new WindowFinder();
+        var service = new TimedScreenshotService(finder, capturer, saver, _testOutputDir);
+        var invalidHandle = (IntPtr)(-1);
+        bool eventTriggered = false;
+
+        service.WindowNotFound += (s, e) => eventTriggered = true;
+
+        try
+        {
+            // Act - 使用无效窗口句柄启动
+            service.Start(invalidHandle, 1);
+            service.TriggerTickForTest();
+
+            // Assert
+            Assert.True(eventTriggered, "WindowNotFound 事件应该被触发");
+            Assert.False(service.IsRunning, "定时器应该已停止");
+        }
+        finally
+        {
+            service.Dispose();
+            Cleanup();
+        }
+    }
+
     private bool _cleanedUp = false;
 
     private void Cleanup()

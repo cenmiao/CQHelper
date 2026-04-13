@@ -80,6 +80,26 @@ public class TimedScreenshotServiceTests : IDisposable
         Assert.False(exists);
     }
 
+    [Fact]
+    public void 窗口不存在时应触发事件并停止定时器 ()
+    {
+        // Arrange
+        var service = new TimedScreenshotService(_finder, _capturer, _saver, _testOutputDir);
+        var invalidHandle = (IntPtr)(-1);
+        bool eventTriggered = false;
+        service.WindowNotFound += (s, e) => eventTriggered = true;
+
+        // Act - 直接触发 Tick 逻辑
+        service.Start(invalidHandle, 1);
+        service.TriggerTickForTest();
+
+        // Assert
+        Assert.True(eventTriggered, "WindowNotFound 事件应该被触发");
+        Assert.False(service.IsRunning, "定时器应该已停止");
+
+        service.Dispose();
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_testOutputDir))

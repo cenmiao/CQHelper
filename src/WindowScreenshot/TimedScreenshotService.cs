@@ -21,6 +21,11 @@ public class TimedScreenshotService : IDisposable
     public bool IsRunning { get; private set; }
 
     /// <summary>
+    /// 当目标窗口不存在时触发的事件
+    /// </summary>
+    public event EventHandler? WindowNotFound;
+
+    /// <summary>
     /// 初始化 TimedScreenshotService 的新实例
     /// </summary>
     public TimedScreenshotService(WindowFinder finder, WindowCapturer capturer, ScreenshotSaver saver, string outputDirectory)
@@ -73,11 +78,25 @@ public class TimedScreenshotService : IDisposable
         return WindowCapturer.IsWindowValid(handle);
     }
 
+    /// <summary>
+    /// 触发定时检查（用于测试）
+    /// </summary>
+    internal void TriggerTickForTest()
+    {
+        Timer_Tick(null, EventArgs.Empty);
+    }
+
     private void Timer_Tick(object? sender, EventArgs e)
     {
         if (!_targetWindowHandle.Equals(IntPtr.Zero) && CheckWindowExists(_targetWindowHandle))
         {
             PerformScreenshot();
+        }
+        else
+        {
+            // 窗口不存在 - 停止定时器并触发事件
+            Stop();
+            WindowNotFound?.Invoke(this, EventArgs.Empty);
         }
     }
 

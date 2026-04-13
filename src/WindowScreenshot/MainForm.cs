@@ -10,6 +10,7 @@ public partial class MainForm : Form
     private readonly WindowFinder _finder;
     private readonly ConfigManager _configManager;
     private TimedScreenshotService? _timedService;
+    private readonly System.Windows.Forms.Timer _countdownTimer;
     private List<WindowInfo> _windows;
     private string _configPath;
     private string _outputDirectory;
@@ -30,6 +31,11 @@ public partial class MainForm : Form
 
         // 输出目录
         _outputDirectory = Path.Combine(AppContext.BaseDirectory, "timed_screenshots");
+
+        // 初始化倒计时定时器
+        _countdownTimer = new System.Windows.Forms.Timer();
+        _countdownTimer.Interval = 1000;
+        _countdownTimer.Tick += CountdownTimer_Tick;
     }
 
     protected override void OnLoad(EventArgs e)
@@ -138,6 +144,8 @@ public partial class MainForm : Form
         {
             // 停止定时截图
             _timedService.Stop();
+            _timedService.WindowNotFound -= TimedService_WindowNotFound;
+            _countdownTimer.Stop();
             timerStatusLabel.Text = "已停止";
             startTimerButton.Text = "开始定时截图";
             nextScreenshotLabel.Text = "";
@@ -155,10 +163,15 @@ public partial class MainForm : Form
                     _timedService = new TimedScreenshotService(_finder, _capturer, _saver, _outputDirectory);
                 }
 
+                // 订阅窗口不存在事件
+                _timedService.WindowNotFound += TimedService_WindowNotFound;
+
                 _timedService.Start(selectedWindow.Handle, intervalSeconds);
                 timerStatusLabel.Text = "运行中";
                 startTimerButton.Text = "停止定时截图";
 
+                // 启动倒计时定时器
+                _countdownTimer.Start();
                 UpdateNextScreenshotLabel();
             }
             catch (Exception ex)
@@ -178,6 +191,35 @@ public partial class MainForm : Form
             var intervalSeconds = (int)intervalNumericUpDown.Value;
             var nextTime = DateTime.Now.AddSeconds(intervalSeconds);
             nextScreenshotLabel.Text = $"下次截图：{nextTime:HH:mm:ss}";
+        }
+    }
+
+    /// <summary>
+    /// 处理定时截图服务的窗口不存在事件
+    /// </summary>
+    private void TimedService_WindowNotFound(object? sender, EventArgs e)
+    {
+        // 在 UI 线程显示消息框
+        if (InvokeRequired)
+        {
+            Invoke(new Action(() => TimedService_WindowNotFound(sender, e)));
+            return;
+        }
+
+        MessageBox.Show("目标窗口不存在，定时截图已停止", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        timerStatusLabel.Text = "已停止";
+        startTimerButton.Text = "开始定时截图";
+        nextScreenshotLabel.Text = "";
+    }
+
+    /// <summary>
+    /// 更新倒计时显示
+    /// </summary>
+    private void CountdownTimer_Tick(object? sender, EventArgs e)
+    {
+        if (_timedService?.IsRunning == true)
+        {
+            UpdateNextScreenshotLabel();
         }
     }
 
@@ -230,7 +272,15 @@ public partial class MainForm : Form
         if (_timedService != null)
         {
             _timedService.Stop();
+            _timedService.WindowNotFound -= TimedService_WindowNotFound;
             _timedService.Dispose();
+        }
+
+        // 停止并释放倒计时定时器
+        if (_countdownTimer != null)
+        {
+            _countdownTimer.Stop();
+            _countdownTimer.Dispose();
         }
 
         base.OnFormClosing(e);

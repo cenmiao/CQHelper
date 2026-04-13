@@ -16,6 +16,7 @@ public class ConfigManagerTests
     [Fact]
     public void Save_ShouldWriteToJsonFile()
     {
+        // Arrange
         var configManager = new ConfigManager(_testConfigPath);
         var settings = new ScreenshotSettings
         {
@@ -27,8 +28,10 @@ public class ConfigManagerTests
 
         try
         {
+            // Act
             configManager.Save(settings);
 
+            // Assert
             Assert.True(File.Exists(_testConfigPath));
             var content = File.ReadAllText(_testConfigPath);
             Assert.Contains("Test Window", content);
@@ -47,6 +50,7 @@ public class ConfigManagerTests
     [Fact]
     public void Load_ShouldReturnSavedData()
     {
+        // Arrange
         var configManager = new ConfigManager(_testConfigPath);
         var originalSettings = new ScreenshotSettings
         {
@@ -58,9 +62,11 @@ public class ConfigManagerTests
 
         try
         {
+            // Act
             configManager.Save(originalSettings);
             var loadedSettings = configManager.Load();
 
+            // Assert
             Assert.Equal("Loaded Window", loadedSettings.TargetWindowTitle);
             Assert.Equal("Chrome", loadedSettings.TargetWindowClassName);
             Assert.Equal(30, loadedSettings.IntervalSeconds);
@@ -78,11 +84,14 @@ public class ConfigManagerTests
     [Fact]
     public void Load_NonExistentFile_ShouldReturnDefaultSettings()
     {
+        // Arrange
         var configManager = new ConfigManager(_testConfigPath);
         Assert.False(File.Exists(_testConfigPath));
 
+        // Act
         var settings = configManager.Load();
 
+        // Assert
         Assert.Equal("", settings.TargetWindowTitle);
         Assert.Equal("", settings.TargetWindowClassName);
         Assert.Equal(0, settings.IntervalSeconds);
@@ -90,16 +99,58 @@ public class ConfigManagerTests
     }
 
     [Fact]
+    public void Save_NullSettings_ThrowsArgumentNullException()
+    {
+        // Arrange
+        var configManager = new ConfigManager(_testConfigPath);
+
+        // Act & Assert
+        Assert.Throws<ArgumentNullException>(() => configManager.Save(null!));
+    }
+
+    [Fact]
+    public void Load_InvalidJsonFile_ShouldReturnDefaultSettings()
+    {
+        // Arrange
+        var configManager = new ConfigManager(_testConfigPath);
+        var invalidJson = "{ invalid json content }";
+
+        try
+        {
+            // Setup - 写入无效的 JSON
+            Directory.CreateDirectory(_testConfigDir);
+            File.WriteAllText(_testConfigPath, invalidJson, System.Text.Encoding.UTF8);
+
+            // Act
+            var settings = configManager.Load();
+
+            // Assert
+            Assert.Equal("", settings.TargetWindowTitle);
+            Assert.Equal("", settings.TargetWindowClassName);
+            Assert.Equal(0, settings.IntervalSeconds);
+            Assert.False(settings.IsEnabled);
+        }
+        finally
+        {
+            if (Directory.Exists(_testConfigDir))
+                Directory.Delete(_testConfigDir, true);
+        }
+    }
+
+    [Fact]
     public void Save_DirectoryNotExists_ShouldCreateDirectory()
     {
+        // Arrange
         var nestedPath = Path.Combine(_testConfigDir, "nested", "config.json");
         var configManager = new ConfigManager(nestedPath);
         var settings = new ScreenshotSettings();
 
         try
         {
+            // Act
             configManager.Save(settings);
 
+            // Assert
             Assert.True(File.Exists(nestedPath));
             Assert.True(Directory.Exists(Path.GetDirectoryName(nestedPath)));
         }

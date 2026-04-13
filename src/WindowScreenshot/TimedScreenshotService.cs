@@ -99,9 +99,13 @@ public class TimedScreenshotService : IDisposable
 
             bitmap.Save(fullPath, System.Drawing.Imaging.ImageFormat.Png);
         }
-        catch (Exception)
+        catch (IOException ex)
         {
-            // 静默失败
+            Console.WriteLine($"[TimedScreenshotService] 截图保存失败：{ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[TimedScreenshotService] 截图失败：{ex.Message}");
         }
     }
 
@@ -126,8 +130,11 @@ public class TimedScreenshotService : IDisposable
         {
             if (disposing)
             {
-                _timer?.Stop();
-                _timer?.Dispose();
+                if (_timer != null)
+                {
+                    _timer.Stop();
+                    _timer.Dispose();
+                }
             }
             _disposed = true;
         }

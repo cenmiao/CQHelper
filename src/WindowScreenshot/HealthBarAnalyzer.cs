@@ -16,11 +16,12 @@ public class RoiConfig
 /// <summary>
 /// 血量/蓝量分析器
 /// </summary>
-public class HealthBarAnalyzer : IGameAnalyzer
+public class HealthBarAnalyzer : IGameAnalyzer, IDisposable
 {
     private readonly TemplateManager _templateManager;
     private readonly RoiConfig _hpRoi;
     private readonly RoiConfig _mpRoi;
+    private bool _disposed = false;
 
     /// <summary>
     /// 识别结果
@@ -105,5 +106,16 @@ public class HealthBarAnalyzer : IGameAnalyzer
         }
 
         return roiImage;
+    }
+
+    /// <summary>
+    /// 释放资源
+    /// </summary>
+    public void Dispose()
+    {
+        if (!_disposed)
+        {
+            _disposed = true;
+        }
     }
 }

@@ -5,10 +5,11 @@ namespace WindowScreenshot;
 /// <summary>
 /// 等级分析器
 /// </summary>
-public class LevelAnalyzer : IGameAnalyzer
+public class LevelAnalyzer : IGameAnalyzer, IDisposable
 {
     private readonly TemplateManager _templateManager;
     private readonly RoiConfig _levelRoi;
+    private bool _disposed = false;
 
     /// <summary>
     /// 识别结果
@@ -81,5 +82,16 @@ public class LevelAnalyzer : IGameAnalyzer
         }
 
         return roiImage;
+    }
+
+    /// <summary>
+    /// 释放资源
+    /// </summary>
+    public void Dispose()
+    {
+        if (!_disposed)
+        {
+            _disposed = true;
+        }
     }
 }

@@ -1,4 +1,5 @@
 using System.IO;
+using System.Drawing;
 
 namespace WindowScreenshot;
 
@@ -14,6 +15,13 @@ public partial class MainForm : Form
     private List<WindowInfo> _windows;
     private string _configPath;
     private string _outputDirectory;
+
+    // 游戏辅助组件
+    private readonly TemplateManager _templateManager;
+    private readonly GameLog _gameLog;
+    private GameAnalysisService? _gameAnalysisService;
+    private HealthBarAnalyzer? _healthBarAnalyzer;
+    private LevelAnalyzer? _levelAnalyzer;
 
     public MainForm()
     {
@@ -36,6 +44,121 @@ public partial class MainForm : Form
         _countdownTimer = new System.Windows.Forms.Timer();
         _countdownTimer.Interval = 1000;
         _countdownTimer.Tick += CountdownTimer_Tick;
+
+        // 游戏辅助组件
+        _templateManager = new TemplateManager();
+        _gameLog = new GameLog();
+
+        // 绑定清空日志按钮事件
+        clearLogButton.Click += ClearLogButton_Click;
+
+        // 初始化游戏分析组件
+        InitializeGameAnalysis();
+    }
+
+    /// <summary>
+    /// 初始化游戏分析组件
+    /// </summary>
+    private void InitializeGameAnalysis()
+    {
+        // 检查模板缓存
+        if (!_templateManager.HasCachedTemplates())
+        {
+            gameAnalysisStatusLabel.Text = "分析状态：需要模板初始化";
+            AppendLog("首次启动，请准备 HP-MP.png 和 LEVEL.png 截图文件", "Warning");
+            return;
+        }
+
+        // 加载模板
+        if (!_templateManager.LoadTemplates())
+        {
+            gameAnalysisStatusLabel.Text = "分析状态：模板加载失败";
+            AppendLog("模板加载失败", "Error");
+            return;
+        }
+
+        // 创建分析器
+        var config = _configManager.Load();
+        _healthBarAnalyzer = new HealthBarAnalyzer(_templateManager,
+            new RoiConfig { XPercent = config.HpRoiXPercent, YPercent = config.HpRoiYPercent, WidthPercent = 7, HeightPercent = 4 },
+            new RoiConfig { XPercent = config.MpRoiXPercent, YPercent = config.MpRoiYPercent, WidthPercent = 7, HeightPercent = 4 });
+
+        _levelAnalyzer = new LevelAnalyzer(_templateManager,
+            new RoiConfig { XPercent = config.LevelRoiXPercent, YPercent = config.LevelRoiYPercent, WidthPercent = 5, HeightPercent = 3 });
+
+        // 创建分析服务
+        _gameAnalysisService = new GameAnalysisService(_healthBarAnalyzer, _levelAnalyzer, _gameLog);
+        _gameAnalysisService.AnalysisCompleted += OnAnalysisCompleted;
+
+        // 根据配置决定是否启用
+        _gameAnalysisService.IsEnabled = config.EnableGameAnalysis;
+
+        gameAnalysisStatusLabel.Text = config.EnableGameAnalysis ? "分析状态：已启用" : "分析状态：已停用";
+        AppendLog("游戏分析组件初始化完成", "Info");
+    }
+
+    /// <summary>
+    /// 处理分析完成事件
+    /// </summary>
+    private void OnAnalysisCompleted(GameInfo gameInfo)
+    {
+        if (InvokeRequired)
+        {
+            Invoke(new Action<GameInfo>(OnAnalysisCompleted), gameInfo);
+            return;
+        }
+
+        // 更新 UI 显示
+        if (!gameInfo.IsEmpty)
+        {
+            hpValueLabel.Text = $"{gameInfo.CurrentHp}/{gameInfo.MaxHp}";
+            mpValueLabel.Text = $"{gameInfo.CurrentMp}/{gameInfo.MaxMp}";
+            levelValueLabel.Text = gameInfo.Level > 0 ? gameInfo.Level.ToString() : "-";
+        }
+        else
+        {
+            hpValueLabel.Text = "-/-";
+            mpValueLabel.Text = "-/-";
+            levelValueLabel.Text = "-";
+        }
+
+        // 更新日志显示
+        UpdateLogDisplay();
+    }
+
+    /// <summary>
+    /// 追加日志
+    /// </summary>
+    private void AppendLog(string message, string level = "Info")
+    {
+        _gameLog.Append(message, level);
+        UpdateLogDisplay();
+    }
+
+    /// <summary>
+    /// 更新日志显示
+    /// </summary>
+    private void UpdateLogDisplay()
+    {
+        if (InvokeRequired)
+        {
+            Invoke(new Action(UpdateLogDisplay));
+            return;
+        }
+
+        var lastLogs = _gameLog.GetLast(100);
+        logTextBox.Lines = lastLogs.Select(e => e.ToString()).ToArray();
+        logTextBox.SelectionStart = logTextBox.TextLength;
+        logTextBox.ScrollToCaret();
+    }
+
+    /// <summary>
+    /// 清空日志按钮点击事件
+    /// </summary>
+    private void ClearLogButton_Click(object? sender, EventArgs e)
+    {
+        _gameLog.Clear();
+        UpdateLogDisplay();
     }
 
     protected override void OnLoad(EventArgs e)
@@ -115,6 +238,13 @@ public partial class MainForm : Form
 
             // 显示保存信息
             statusLabel.Text = $"已保存：{path}";
+
+            // 如果启用了游戏分析，进行分析
+            if (_gameAnalysisService?.IsEnabled == true)
+            {
+                using var analyzeImage = new Bitmap(path);
+                _gameAnalysisService.Analyze(analyzeImage);
+            }
         }
         catch (Exception ex)
         {
@@ -145,6 +275,7 @@ public partial class MainForm : Form
             // 停止定时截图
             _timedService.Stop();
             _timedService.WindowNotFound -= TimedService_WindowNotFound;
+            _timedService.ScreenshotCaptured -= OnScreenshotCaptured;
             _countdownTimer.Stop();
             timerStatusLabel.Text = "已停止";
             startTimerButton.Text = "开始定时截图";
@@ -166,6 +297,12 @@ public partial class MainForm : Form
                 // 订阅窗口不存在事件
                 _timedService.WindowNotFound += TimedService_WindowNotFound;
 
+                // 订阅截图完成事件（用于游戏分析）
+                if (_gameAnalysisService?.IsEnabled == true)
+                {
+                    _timedService.ScreenshotCaptured += OnScreenshotCaptured;
+                }
+
                 _timedService.Start(selectedWindow.Handle, intervalSeconds);
                 timerStatusLabel.Text = "运行中";
                 startTimerButton.Text = "停止定时截图";
@@ -182,6 +319,19 @@ public partial class MainForm : Form
         }
 
         SaveConfiguration();
+    }
+
+    /// <summary>
+    /// 处理截图完成事件
+    /// </summary>
+    private void OnScreenshotCaptured(Bitmap bitmap)
+    {
+        if (_gameAnalysisService?.IsEnabled == true)
+        {
+            // 需要克隆 Bitmap，因为原图会被 Dispose
+            using var clone = new Bitmap(bitmap);
+            _gameAnalysisService.Analyze(clone);
+        }
     }
 
     private void UpdateNextScreenshotLabel()
@@ -260,6 +410,9 @@ public partial class MainForm : Form
         settings.IntervalSeconds = (int)intervalNumericUpDown.Value;
         settings.IsEnabled = _timedService?.IsRunning ?? false;
 
+        // 游戏辅助配置
+        settings.EnableGameAnalysis = _gameAnalysisService?.IsEnabled ?? false;
+
         _configManager.Save(settings);
     }
 
@@ -273,6 +426,7 @@ public partial class MainForm : Form
         {
             _timedService.Stop();
             _timedService.WindowNotFound -= TimedService_WindowNotFound;
+            _timedService.ScreenshotCaptured -= OnScreenshotCaptured;
             _timedService.Dispose();
         }
 
@@ -282,6 +436,16 @@ public partial class MainForm : Form
             _countdownTimer.Stop();
             _countdownTimer.Dispose();
         }
+
+        // 释放游戏分析服务
+        if (_gameAnalysisService != null)
+        {
+            _gameAnalysisService.AnalysisCompleted -= OnAnalysisCompleted;
+            _gameAnalysisService.Dispose();
+        }
+
+        // 释放模板管理器
+        _templateManager.Dispose();
 
         base.OnFormClosing(e);
     }

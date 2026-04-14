@@ -26,6 +26,11 @@ public class TimedScreenshotService : IDisposable
     public event EventHandler? WindowNotFound;
 
     /// <summary>
+    /// 当截图完成时触发的事件（用于游戏分析）
+    /// </summary>
+    public event Action<Bitmap>? ScreenshotCaptured;
+
+    /// <summary>
     /// 初始化 TimedScreenshotService 的新实例
     /// </summary>
     public TimedScreenshotService(WindowFinder finder, WindowCapturer capturer, ScreenshotSaver saver, string outputDirectory)
@@ -117,6 +122,9 @@ public class TimedScreenshotService : IDisposable
             }
 
             bitmap.Save(fullPath, System.Drawing.Imaging.ImageFormat.Png);
+
+            // 触发截图完成事件
+            ScreenshotCaptured?.Invoke(bitmap);
         }
         catch (IOException ex)
         {

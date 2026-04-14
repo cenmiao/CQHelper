@@ -1,5 +1,7 @@
 using System.IO;
 using System.Drawing;
+using System.Threading.Tasks;
+using System.Windows.Forms;
 
 namespace WindowScreenshot;
 
@@ -59,24 +61,75 @@ public partial class MainForm : Form
     /// <summary>
     /// 初始化游戏分析组件
     /// </summary>
-    private void InitializeGameAnalysis()
+    private async void InitializeGameAnalysis()
     {
         // 检查模板缓存
         if (!_templateManager.HasCachedTemplates())
         {
             gameAnalysisStatusLabel.Text = "分析状态：需要模板初始化";
-            AppendLog("首次启动，请准备 HP-MP.png 和 LEVEL.png 截图文件", "Warning");
+            AppendLog("首次启动，检测截图文件...", "Warning");
+
+            // 尝试自动提取模板
+            var extractSuccess = await InitializeTemplatesAsync();
+            if (!extractSuccess)
+            {
+                // 检查是否有手动放置的模板
+                if (_templateManager.HasManualTemplates())
+                {
+                    AppendLog("检测到手动放置的模板，尝试加载...", "Info");
+                    if (_templateManager.LoadTemplates())
+                    {
+                        InitializeAnalyzersAndService();
+                        gameAnalysisStatusLabel.Text = "分析状态：已启用（手动模板）";
+                        AppendLog("手动模板加载成功，游戏分析功能已启用", "Info");
+                        return;
+                    }
+                }
+
+                gameAnalysisStatusLabel.Text = "分析状态：模板未初始化";
+                AppendLog("模板初始化失败，游戏分析功能不可用", "Error");
+                AppendLog("请将 HP-MP.png 和 LEVEL.png 放到 screenshot 目录后重启应用", "Warning");
+                AppendLog("或者手动创建模板文件到 templates/hp_mp/ 和 templates/level/ 目录", "Warning");
+                return;
+            }
+
+            AppendLog("模板提取成功，游戏分析功能已启用", "Info");
+            gameAnalysisStatusLabel.Text = "分析状态：已启用";
             return;
         }
 
         // 加载模板
         if (!_templateManager.LoadTemplates())
         {
+            // 尝试手动模板备选方案
+            if (_templateManager.HasManualTemplates())
+            {
+                AppendLog("缓存模板加载失败，尝试手动模板...", "Warning");
+                if (_templateManager.LoadTemplates())
+                {
+                    InitializeAnalyzersAndService();
+                    gameAnalysisStatusLabel.Text = "分析状态：已启用（手动模板）";
+                    AppendLog("手动模板加载成功", "Info");
+                    return;
+                }
+            }
+
             gameAnalysisStatusLabel.Text = "分析状态：模板加载失败";
             AppendLog("模板加载失败", "Error");
+            AppendLog(TemplateManager.GetManualTemplateGuide(), "Warning");
             return;
         }
 
+        InitializeAnalyzersAndService();
+        gameAnalysisStatusLabel.Text = _gameAnalysisService.IsEnabled ? "分析状态：已启用" : "分析状态：已停用";
+        AppendLog("游戏分析组件初始化完成", "Info");
+    }
+
+    /// <summary>
+    /// 初始化分析器和服务
+    /// </summary>
+    private void InitializeAnalyzersAndService()
+    {
         // 创建分析器
         var config = _configManager.Load();
         _healthBarAnalyzer = new HealthBarAnalyzer(_templateManager,
@@ -92,9 +145,43 @@ public partial class MainForm : Form
 
         // 根据配置决定是否启用
         _gameAnalysisService.IsEnabled = config.EnableGameAnalysis;
+    }
 
-        gameAnalysisStatusLabel.Text = config.EnableGameAnalysis ? "分析状态：已启用" : "分析状态：已停用";
-        AppendLog("游戏分析组件初始化完成", "Info");
+    /// <summary>
+    /// 初始化模板（首次启动时提取）
+    /// </summary>
+    private async Task<bool> InitializeTemplatesAsync()
+    {
+        try
+        {
+            // 使用 MessageBox 作为用户确认回调
+            var result = await _templateManager.ExtractTemplatesAsync(async (message) =>
+            {
+                // 在 UI 线程显示确认对话框
+                if (InvokeRequired)
+                {
+                    var tcs = new TaskCompletionSource<bool>();
+                    Invoke(new Action(() =>
+                    {
+                        var dialogResult = MessageBox.Show(
+                            message,
+                            "模板提取确认",
+                            MessageBoxButtons.YesNo,
+                            MessageBoxIcon.Question);
+                        tcs.SetResult(dialogResult == DialogResult.Yes);
+                    }));
+                    return await tcs.Task;
+                }
+                return false;
+            });
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"模板提取失败：{ex.Message}", "Error");
+            return false;
+        }
     }
 
     /// <summary>

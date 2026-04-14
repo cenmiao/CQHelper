@@ -123,6 +123,162 @@ public class IntegrationTests : IDisposable
         }
     }
 
+    [Fact]
+    public void 完整流程_游戏分析服务初始化 ()
+    {
+        // Arrange
+        var testTemplatesDir = Path.Combine(Path.GetTempPath(), "templates_" + Guid.NewGuid());
+        var testScreenshotDir = Path.Combine(Path.GetTempPath(), "screenshots_" + Guid.NewGuid());
+        Directory.CreateDirectory(testTemplatesDir);
+        Directory.CreateDirectory(testScreenshotDir);
+
+        var templateManager = new TemplateManager(testTemplatesDir, testScreenshotDir);
+        var gameLog = new GameLog();
+
+        try
+        {
+            // Act - 创建分析器和服务
+            var healthBarAnalyzer = new HealthBarAnalyzer(templateManager);
+            var levelAnalyzer = new LevelAnalyzer(templateManager);
+            var gameAnalysisService = new GameAnalysisService(healthBarAnalyzer, levelAnalyzer, gameLog);
+
+            // Assert
+            Assert.NotNull(gameAnalysisService);
+            Assert.True(gameAnalysisService.IsEnabled);
+        }
+        finally
+        {
+            if (Directory.Exists(testTemplatesDir))
+                Directory.Delete(testTemplatesDir, true);
+            if (Directory.Exists(testScreenshotDir))
+                Directory.Delete(testScreenshotDir, true);
+        }
+    }
+
+    [Fact]
+    public void 完整流程_游戏分析服务分析截图 ()
+    {
+        // Arrange
+        var testTemplatesDir = Path.Combine(Path.GetTempPath(), "templates_" + Guid.NewGuid());
+        var testScreenshotDir = Path.Combine(Path.GetTempPath(), "screenshots_" + Guid.NewGuid());
+        Directory.CreateDirectory(testTemplatesDir);
+        Directory.CreateDirectory(testScreenshotDir);
+
+        // 创建模板文件
+        var hpMpDir = Path.Combine(testTemplatesDir, "hp_mp");
+        var levelDir = Path.Combine(testTemplatesDir, "level");
+        Directory.CreateDirectory(hpMpDir);
+        Directory.CreateDirectory(levelDir);
+
+        using var testBitmap = new Bitmap(10, 10);
+        for (int i = 0; i <= 9; i++)
+        {
+            testBitmap.Save(Path.Combine(hpMpDir, $"char_{i}.png"), System.Drawing.Imaging.ImageFormat.Png);
+            testBitmap.Save(Path.Combine(levelDir, $"char_{i}.png"), System.Drawing.Imaging.ImageFormat.Png);
+        }
+
+        var templateManager = new TemplateManager(testTemplatesDir, testScreenshotDir);
+        templateManager.LoadTemplates();
+        var gameLog = new GameLog();
+
+        try
+        {
+            // Act
+            var healthBarAnalyzer = new HealthBarAnalyzer(templateManager);
+            var levelAnalyzer = new LevelAnalyzer(templateManager);
+            var gameAnalysisService = new GameAnalysisService(healthBarAnalyzer, levelAnalyzer, gameLog);
+
+            using var testScreenshot = new Bitmap(800, 600);
+            using var g = Graphics.FromImage(testScreenshot);
+            g.Clear(Color.White);
+
+            bool analysisCompleted = false;
+            gameAnalysisService.AnalysisCompleted += (info) => analysisCompleted = true;
+
+            gameAnalysisService.Analyze(testScreenshot);
+
+            // Assert
+            Assert.True(analysisCompleted, "AnalysisCompleted 事件应该被触发");
+            Assert.NotNull(gameAnalysisService.LastResult);
+            Assert.Equal(2, gameLog.Count); // HP 和 MP 日志
+        }
+        finally
+        {
+            if (Directory.Exists(testTemplatesDir))
+                Directory.Delete(testTemplatesDir, true);
+            if (Directory.Exists(testScreenshotDir))
+                Directory.Delete(testScreenshotDir, true);
+        }
+    }
+
+    [Fact]
+    public void 完整流程_定时截图服务与分析服务集成 ()
+    {
+        // Arrange
+        var testTemplatesDir = Path.Combine(Path.GetTempPath(), "templates_" + Guid.NewGuid());
+        var testScreenshotDir = Path.Combine(Path.GetTempPath(), "screenshots_" + Guid.NewGuid());
+        Directory.CreateDirectory(testTemplatesDir);
+        Directory.CreateDirectory(testScreenshotDir);
+
+        var templateManager = new TemplateManager(testTemplatesDir, testScreenshotDir);
+        var gameLog = new GameLog();
+
+        // 创建模板文件
+        var hpMpDir = Path.Combine(testTemplatesDir, "hp_mp");
+        var levelDir = Path.Combine(testTemplatesDir, "level");
+        Directory.CreateDirectory(hpMpDir);
+        Directory.CreateDirectory(levelDir);
+
+        using var testBitmap = new Bitmap(10, 10);
+        for (int i = 0; i <= 9; i++)
+        {
+            testBitmap.Save(Path.Combine(hpMpDir, $"char_{i}.png"), System.Drawing.Imaging.ImageFormat.Png);
+            testBitmap.Save(Path.Combine(levelDir, $"char_{i}.png"), System.Drawing.Imaging.ImageFormat.Png);
+        }
+        templateManager.LoadTemplates();
+
+        var healthBarAnalyzer = new HealthBarAnalyzer(templateManager);
+        var levelAnalyzer = new LevelAnalyzer(templateManager);
+        var gameAnalysisService = new GameAnalysisService(healthBarAnalyzer, levelAnalyzer, gameLog);
+
+        var capturer = new WindowCapturer();
+        var saver = new ScreenshotSaver(capturer);
+        var finder = new WindowFinder();
+        var timedService = new TimedScreenshotService(finder, capturer, saver, _testOutputDir);
+
+        bool screenshotCaptured = false;
+        timedService.ScreenshotCaptured += (bitmap) => screenshotCaptured = true;
+
+        var enumerator = new WindowEnumerator();
+        var windows = enumerator.EnumWindows();
+
+        try
+        {
+            Assert.NotEmpty(windows);
+            var targetWindow = windows[0];
+
+            // Act - 启动定时截图服务
+            timedService.Start(targetWindow.Handle, 5);
+            Assert.True(timedService.IsRunning);
+
+            // 触发一次截图
+            timedService.TriggerTickForTest();
+
+            // Assert - 验证截图事件被触发
+            Assert.True(screenshotCaptured, "ScreenshotCaptured 事件应该被触发");
+        }
+        finally
+        {
+            timedService.Dispose();
+            gameAnalysisService.Dispose();
+            Cleanup();
+            if (Directory.Exists(testTemplatesDir))
+                Directory.Delete(testTemplatesDir, true);
+            if (Directory.Exists(testScreenshotDir))
+                Directory.Delete(testScreenshotDir, true);
+        }
+    }
+
     private bool _cleanedUp = false;
 
     private void Cleanup()

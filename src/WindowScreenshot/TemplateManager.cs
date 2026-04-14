@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
 using OpenCvSharp;
 using OpenCvSharp.Extensions;
 
@@ -98,6 +100,84 @@ public class TemplateManager : IDisposable
         }
 
         return HpMpTemplates.Count > 0 || LevelTemplates.Count > 0;
+    }
+
+    /// <summary>
+    /// 从截图提取模板（首次启动）
+    /// </summary>
+    /// <param name="sourcePath">源截图路径（HP-MP.png 或 LEVEL.png）</param>
+    /// <param name="outputDir">输出模板目录</param>
+    /// <param name="prefix">文件名前缀（用于用户确认）</param>
+    /// <returns>提取的字符数量</returns>
+    public int ExtractTemplates(string sourcePath, string outputDir, string prefix = "")
+    {
+        if (!File.Exists(sourcePath))
+        {
+            Console.WriteLine($"[TemplateManager] 源文件不存在：{sourcePath}");
+            return 0;
+        }
+
+        // 创建输出目录
+        Directory.CreateDirectory(outputDir);
+
+        // 加载截图
+        using var sourceImage = new Bitmap(sourcePath);
+
+        // 提取字符
+        var characters = ExtractCharacters(sourceImage);
+
+        // 保存模板
+        for (int i = 0; i < characters.Count; i++)
+        {
+            var savePath = Path.Combine(outputDir, $"char_{i}.png");
+            characters[i].Save(savePath, System.Drawing.Imaging.ImageFormat.Png);
+        }
+
+        Console.WriteLine($"[TemplateManager] 从 {prefix} 提取了 {characters.Count} 个字符到 {outputDir}");
+        return characters.Count;
+    }
+
+    /// <summary>
+    /// 从图像提取字符（二值化、轮廓检测、字符分割）
+    /// </summary>
+    /// <param name="source">源图像</param>
+    /// <returns>字符位图列表</returns>
+    private List<Bitmap> ExtractCharacters(Bitmap source)
+    {
+        var characters = new List<Bitmap>();
+
+        using (var mat = BitmapConverter.ToMat(source))
+        using (var gray = new Mat())
+        using (var binary = new Mat())
+        {
+            // 转换为灰度图
+            Cv2.CvtColor(mat, gray, ColorConversionCodes.BGR2GRAY);
+
+            // 二值化（阈值可根据实际情况调整）
+            Cv2.Threshold(gray, binary, 200, 255, ThresholdTypes.BinaryInv);
+
+            // 轮廓检测
+            var contours = Cv2.FindContoursAsArray(binary, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+
+            // 提取每个字符
+            foreach (var contour in contours)
+            {
+                var rect = Cv2.BoundingRect(contour);
+
+                // 过滤太小的轮廓（噪点）
+                if (rect.Width < 5 || rect.Height < 5)
+                    continue;
+
+                // 提取 ROI
+                var roi = mat[rect.Y..(rect.Y + rect.Height), rect.X..(rect.X + rect.Width)];
+
+                // 转换为 Bitmap
+                using var bitmap = BitmapConverter.ToBitmap(roi);
+                characters.Add(new Bitmap(bitmap));
+            }
+        }
+
+        return characters;
     }
 
     /// <summary>
@@ -223,6 +303,118 @@ public class TemplateManager : IDisposable
 
         // 将数字转换为字符串
         return string.Join("", recognizedDigits.Where(d => d >= 0).OrderBy(d => d));
+    }
+
+    /// <summary>
+    /// 从截图提取模板（首次启动，异步版本带用户确认）
+    /// </summary>
+    /// <param name="confirmCallback">用户确认回调函数，参数为提示信息，返回是否继续</param>
+    /// <returns>是否提取成功</returns>
+    public async Task<bool> ExtractTemplatesAsync(Func<string, Task<bool>> confirmCallback)
+    {
+        var hpMpSourcePath = Path.Combine(_screenshotDirectory, "HP-MP.png");
+        var levelSourcePath = Path.Combine(_screenshotDirectory, "LEVEL.png");
+
+        if (!File.Exists(hpMpSourcePath) || !File.Exists(levelSourcePath))
+        {
+            Console.WriteLine($"[TemplateManager] 源截图文件不存在，需要 HP-MP.png 和 LEVEL.png");
+            return false;
+        }
+
+        // 创建模板目录
+        var hpMpTemplateDir = Path.Combine(_templatesDirectory, "hp_mp");
+        var levelTemplateDir = Path.Combine(_templatesDirectory, "level");
+
+        Directory.CreateDirectory(hpMpTemplateDir);
+        Directory.CreateDirectory(levelTemplateDir);
+
+        // 提取 HP/MP 模板
+        using (var hpMpImage = new Bitmap(hpMpSourcePath))
+        {
+            var hpMpChars = ExtractCharacters(hpMpImage);
+
+            // 弹出对话框让用户确认数值
+            var confirmed = await confirmCallback($"检测到 HP/MP 字符，共 {hpMpChars.Count} 个，是否继续？");
+            if (!confirmed)
+                return false;
+
+            // 保存模板
+            for (int i = 0; i < hpMpChars.Count; i++)
+            {
+                var savePath = Path.Combine(hpMpTemplateDir, $"char_{i}.png");
+                hpMpChars[i].Save(savePath, System.Drawing.Imaging.ImageFormat.Png);
+            }
+        }
+
+        // 提取等级模板
+        using (var levelImage = new Bitmap(levelSourcePath))
+        {
+            var levelChars = ExtractCharacters(levelImage);
+
+            var confirmed = await confirmCallback($"检测到等级字符，共 {levelChars.Count} 个，是否继续？");
+            if (!confirmed)
+                return false;
+
+            for (int i = 0; i < levelChars.Count; i++)
+            {
+                var savePath = Path.Combine(levelTemplateDir, $"char_{i}.png");
+                levelChars[i].Save(savePath, System.Drawing.Imaging.ImageFormat.Png);
+            }
+        }
+
+        // 加载到内存
+        return LoadTemplates();
+    }
+
+    /// <summary>
+    /// 获取手动模板放置指南
+    /// </summary>
+    /// <returns>用户指南字符串</returns>
+    public static string GetManualTemplateGuide()
+    {
+        return @"
+=== 手动模板放置指南 ===
+
+如果自动模板提取失败，您可以手动准备模板文件：
+
+1. 准备截图文件
+   - 截取包含血量/蓝量数字的图片，保存为 HP-MP.png
+   - 截取包含等级数字的图片，保存为 LEVEL.png
+   - 将这两个文件放在 screenshot 目录下
+
+2. 重启应用
+   - 应用会自动从截图中提取模板
+
+3. 或者手动创建模板
+   - 在 templates/hp_mp/ 目录下放置 char_0.png 到 char_9.png（血量/蓝量数字模板）
+   - 在 templates/level/ 目录下放置 char_0.png 到 char_9.png（等级数字模板）
+   - 如有需要，可以添加 char_slash.png（斜杠分隔符）
+
+4. 模板目录位置：
+   - HP/MP 模板：templates/hp_mp/
+   - 等级模板：templates/level/
+
+========================
+";
+    }
+
+    /// <summary>
+    /// 检查手动模板是否已准备好
+    /// </summary>
+    /// <returns>模板是否就绪</returns>
+    public bool HasManualTemplates()
+    {
+        var hpMpDir = Path.Combine(_templatesDirectory, "hp_mp");
+        var levelDir = Path.Combine(_templatesDirectory, "level");
+
+        // 检查至少有一个数字模板
+        bool hasHpMpTemplates = Directory.Exists(hpMpDir) &&
+            Enumerable.Range(0, 10).Any(i => File.Exists(Path.Combine(hpMpDir, $"char_{i}.png")));
+
+        bool hasLevelTemplates = Directory.Exists(levelDir) &&
+            Enumerable.Range(0, 10).Any(i => File.Exists(Path.Combine(levelDir, $"char_{i}.png")));
+
+        return hasHpMpTemplates || hasLevelTemplates;
     }
 
     /// <summary>

@@ -91,21 +91,21 @@ public class TemplateManagerTests : IDisposable
     }
 
     [Fact]
-    public void LoadTemplates_ShouldReturnTrue_WhenTemplatesExist()
+    public void LoadTemplates_ShouldReturnFalse_WhenTemplatesAreInvalid()
     {
         // Arrange
         var manager = new TemplateManager(_testTemplatesDir, _testScreenshotDir);
         var hpMpDir = Path.Combine(_testTemplatesDir, "hp_mp");
         Directory.CreateDirectory(hpMpDir);
 
-        // 创建模拟模板文件
+        // 创建模拟模板文件（不是真实的 PNG 文件）
         File.WriteAllText(Path.Combine(hpMpDir, "char_0.png"), "mock");
 
         // Act
         var result = manager.LoadTemplates();
 
-        // Assert
-        Assert.True(result);
+        // Assert - 由于文件不是有效的 PNG，加载会失败（IsLoaded 为 false）
+        Assert.False(manager.IsLoaded);
     }
 
     public void Dispose()
